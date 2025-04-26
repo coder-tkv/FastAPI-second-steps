@@ -1,16 +1,12 @@
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from fastapi import FastAPI
 
-data = {
-    'email': 'abc@mail.ru',
-    'bio': 'Я пирожок',
-    'age': 12
-}
+
+app = FastAPI()
 
 data_wo_age = {
     'email': 'abc@mail.ru',
     'bio': 'Я пирожок',
-    'gender': 'male',
-    'birthday': '2022'
 }
 
 
@@ -21,11 +17,15 @@ class UserSchema(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-class UserAgeSchema(UserSchema):
-    age: int = Field(ge=0, le=130)
+users = []
 
 
-user = UserAgeSchema(**data)
-user_wo_age = UserSchema(**data_wo_age)
-print(repr(user))
-print(repr(user_wo_age))
+@app.post('/users')
+async def add_user(user: UserSchema):
+    users.append(user)
+    return {'ok': True, 'msg': 'Юзер добавлен'}
+
+
+@app.get('/users')
+async def get_users() -> list[UserSchema]:
+    return users
