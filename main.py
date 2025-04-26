@@ -1,14 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 data = {
-    'email': 'abc@mail',
+    'email': 'abc@mail.ru',
     'bio': None,
-    'age': -12
+    'age': 12
 }
 
 
 class UserSchema(BaseModel):
-    email: str
+    email: EmailStr
     bio: str | None
     age: int = Field(ge=0, le=130)
 
