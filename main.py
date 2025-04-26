@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 data = {
     'email': 'abc@mail.ru',
@@ -8,13 +8,17 @@ data = {
 
 data_wo_age = {
     'email': 'abc@mail.ru',
-    'bio': 'Я пирожок'
+    'bio': 'Я пирожок',
+    'gender': 'male',
+    'birthday': '2022'
 }
 
 
 class UserSchema(BaseModel):
     email: EmailStr
     bio: str | None = Field(max_length=10)
+
+    model_config = ConfigDict(extra='forbid')
 
 
 class UserAgeSchema(UserSchema):
