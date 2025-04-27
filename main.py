@@ -64,4 +64,3 @@ async def get_books(session: SessionDep):
     query = select(BookModel)
     result = await session.execute(query)
     return result.scalars().all()
-
