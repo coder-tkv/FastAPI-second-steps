@@ -1,50 +1,31 @@
-import uvicorn
-from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from authx import AuthX, AuthXConfig
+from fastapi import FastAPI, HTTPException, Response, Depends
 
 app = FastAPI()
 
-books = [
-    {
-        'id': 1,
-        'title': 'Асинхронность в Python',
-        'author': 'Мэттью'
-    },
-    {
-        'id': 2,
-        'title': 'Backend разработка в Python',
-        'author': 'Егор'
-    }
-]
+config = AuthXConfig()
+config.JWT_SECRET_KEY = 'SECRET_KEY'
+config.JWT_ACCESS_COOKIE_NAME = 'my_access_token'
+config.JWT_TOKEN_LOCATION = ['cookies']
+
+security = AuthX(config=config)
 
 
-@app.get('/books', tags=['Книги 📚'], summary='Получить все книги')
-async def read_books():
-    return books
+class UserLoginSchema(BaseModel):
+    username: str
+    password: str
 
 
-@app.get('/books/{book_id}', tags=['Книги 📚'], summary='Получить конкретную книгу')
-async def get_book(book_id: int):
-    for book in books:
-        if book['id'] == book_id:
-            return book
-    raise HTTPException(status_code=404, detail='Книга не найдена')
+@app.post('/login')
+async def login(creds: UserLoginSchema, response: Response):
+    if creds.username == 'test' and creds.password == 'test':
+        token = security.create_access_token(uid='12345')
+        response.set_cookie(config.JWT_ACCESS_COOKIE_NAME, token)
+        return {'access_token': token}
+    raise HTTPException(status_code=401, detail='Incorrect username or password')
 
 
-class NewBook(BaseModel):
-    title: str
-    author: str
-
-
-@app.post('/books', tags=['Книги 📚'])
-async def create_book(new_book: NewBook):
-    books.append({
-        'id': len(books) + 1,
-        'title': new_book.title,
-        'author': new_book.author
-    })
-    return {'success': True, 'message': 'Книга успешно добавлена'}
-
-
-if __name__ == '__main__':
-    uvicorn.run('main:app', reload=True)
+@app.get('/protected', dependencies=[Depends(security.access_token_required)])
+def protected():
+    return {'data': 'top_secret'}
