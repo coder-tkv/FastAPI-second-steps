@@ -13,7 +13,6 @@ from jwt_authx import auth, get_payload_from_token
 
 app = FastAPI()
 
-Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 
