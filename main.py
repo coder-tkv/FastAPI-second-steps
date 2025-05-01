@@ -8,7 +8,7 @@ import hashlib
 from models import Base, UserModel, PostModel
 from schemas import UserRegisterSchema, UserLoginSchema, PostCreateSchema
 from database import engine, session_local
-from jwt_authx import auth, get_payload_from_token
+from jwt_authx import auth, get_payload_from_token, verify_token
 
 
 app = FastAPI()
@@ -30,7 +30,6 @@ def register(creds: UserRegisterSchema, session: Session = Depends(get_sessions)
     if db_user:
         raise HTTPException(status_code=403, detail='Users exists')
     password_hash = hashlib.md5(creds.password.encode()).hexdigest()
-    print(password_hash)
     new_user = UserModel(
         username=creds.username,
         password=password_hash,
@@ -49,7 +48,6 @@ def login(creds: UserLoginSchema, session: Session = Depends(get_sessions)) -> d
         raise HTTPException(status_code=403, detail='Incorrect username')
     password_hash = hashlib.md5(creds.password.encode()).hexdigest()
     if db_user.password == password_hash:
-        print(db_user.id)
         token = auth.create_access_token(uid=str(db_user.id))
         return {'access_token': token}
     raise HTTPException(status_code=403, detail='Incorrect password')
@@ -57,10 +55,7 @@ def login(creds: UserLoginSchema, session: Session = Depends(get_sessions)) -> d
 
 @app.get('/users', dependencies=[Depends(auth.get_token_from_request)])
 def get_users(session: Session = Depends(get_sessions), token: RequestToken = Depends()):
-    try:
-        auth.verify_token(token=token)
-    except Exception as e:
-        raise HTTPException(401, detail={"message": str(e)}) from e
+    verify_token(token)
 
     query = select(UserModel)
     results = session.execute(query)
@@ -78,10 +73,7 @@ def get_users(session: Session = Depends(get_sessions), token: RequestToken = De
 
 @app.get('/users/{user_id}', dependencies=[Depends(auth.get_token_from_request)])
 def get_user_with_id(user_id: int, session: Session = Depends(get_sessions), token: RequestToken = Depends()):
-    try:
-        auth.verify_token(token=token)
-    except Exception as e:
-        raise HTTPException(401, detail={"message": str(e)}) from e
+    verify_token(token)
 
     db_user = session.query(UserModel).filter(user_id == UserModel.id)
     if db_user.scalar() is None:
@@ -92,10 +84,7 @@ def get_user_with_id(user_id: int, session: Session = Depends(get_sessions), tok
 
 @app.post('/posts', dependencies=[Depends(auth.get_token_from_request)])
 def create_post(post: PostCreateSchema, session: Session = Depends(get_sessions), token: RequestToken = Depends()):
-    try:
-        auth.verify_token(token=token)
-    except Exception as e:
-        raise HTTPException(401, detail={"message": str(e)}) from e
+    verify_token(token)
 
     uid = get_payload_from_token(token.token)['sub']
 
@@ -111,10 +100,7 @@ def create_post(post: PostCreateSchema, session: Session = Depends(get_sessions)
 
 @app.get('/posts', dependencies=[Depends(auth.get_token_from_request)])
 def get_posts(session: Session = Depends(get_sessions), token: RequestToken = Depends()):
-    try:
-        auth.verify_token(token=token)
-    except Exception as e:
-        raise HTTPException(401, detail={"message": str(e)}) from e
+    verify_token(token)
 
     query = select(PostModel)
     result = session.execute(query)
@@ -123,10 +109,7 @@ def get_posts(session: Session = Depends(get_sessions), token: RequestToken = De
 
 @app.get('/posts/{post_id}', dependencies=[Depends(auth.get_token_from_request)])
 def get_post_with_id(post_id: int, session: Session = Depends(get_sessions), token: RequestToken = Depends()):
-    try:
-        auth.verify_token(token=token)
-    except Exception as e:
-        raise HTTPException(401, detail={"message": str(e)}) from e
+    verify_token(token)
 
     post = session.query(PostModel).filter(post_id == PostModel.author_id)
     if post.scalar() is None:

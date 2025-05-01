@@ -1,6 +1,7 @@
 import jwt
 from jwt import PyJWTError
 from authx import AuthX, AuthXConfig
+from fastapi import HTTPException
 
 config = AuthXConfig()
 config.JWT_SECRET_KEY = 'SECRET_KEY'
@@ -15,3 +16,10 @@ def get_payload_from_token(token: str):
         return payload
     except PyJWTError as e:
         raise ValueError(f"Invalid token: {e}")
+
+
+def verify_token(token):
+    try:
+        auth.verify_token(token=token)
+    except Exception as e:
+        raise HTTPException(401, detail={"message": str(e)}) from e
