@@ -1,5 +1,4 @@
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException
@@ -8,7 +7,7 @@ import hashlib
 from typing import Annotated, List
 
 from models import Base, UserModel, PostModel
-from schemas import UserRegisterSchema, UserLoginSchema, PostCreateSchema, UserSchema, PostResponseSchema, UserResponseSchema
+from schemas import UserRegisterSchema, UserLoginSchema, PostCreateSchema, PostResponseSchema, UserResponseSchema
 from database import get_sessions, engine
 from jwt_authx import auth, get_payload_from_token, verify_token
 
