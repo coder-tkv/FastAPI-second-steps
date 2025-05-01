@@ -54,7 +54,6 @@ async def login(
         raise HTTPException(status_code=403, detail='Incorrect username')
 
     password_hash = hashlib.md5(creds.password.encode()).hexdigest()
-    print(db_user.password)
     if db_user.password == password_hash:
         token = auth.create_access_token(uid=str(db_user.id))
         return {'access_token': token}
