@@ -14,8 +14,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from models import Base, UserModel, PostModel, LikeModel, CommentModel
-from schemas import UserRegisterSchema, UserLoginSchema, UserResponseSchema, CommentSchema, CommentResponseSchema
-from schemas import PostCreateSchema, PostResponseSchema
+from schemas import UserRegisterSchema, UserLoginSchema, UserResponseSchema, PostCreateSchema, PostResponseSchema, \
+                    CommentSchema, CommentResponseSchema, LikeResponseSchema
 from database import get_sessions, engine
 from jwt_authx import auth, get_payload_from_token, verify_token
 
@@ -39,7 +39,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_sessions)]
 
 @app.post('/setup_database')
 @limiter.limit("1/minute")
-async def setup_database() -> dict:
+async def setup_database(request: Request) -> dict:  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -50,6 +50,7 @@ async def setup_database() -> dict:
 @limiter.limit("2/minute")
 async def register(
         creds: UserRegisterSchema,
+        request: Request,  # noqa
         session: SessionDep) -> dict:
     query = select(UserModel).where(creds.username == UserModel.username)
     result = await session.execute(query)
@@ -71,6 +72,7 @@ async def register(
 @limiter.limit("5/minute")
 async def login(
         creds: UserLoginSchema,
+        request: Request,  # noqa
         session: SessionDep) -> dict:
     query = select(UserModel).where(creds.username == UserModel.username)
     result = await session.execute(query)
@@ -89,6 +91,7 @@ async def login(
 @limiter.limit("5/15 seconds")
 async def get_users(
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> List[UserResponseSchema]:
     verify_token(token)
 
@@ -107,6 +110,7 @@ async def get_users(
 async def get_user_with_id(
         user_id: int,
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> UserResponseSchema:
     verify_token(token)
 
@@ -123,6 +127,7 @@ async def get_user_with_id(
 async def create_post(
         post: PostCreateSchema,
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
     verify_token(token)
 
@@ -144,6 +149,7 @@ async def create_post(
 @limiter.limit("5/15 seconds")
 async def get_posts(
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> List[PostResponseSchema]:
     verify_token(token)
 
@@ -171,6 +177,7 @@ async def get_posts(
 async def get_post_with_id(
         post_id: int,
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> PostResponseSchema:
     verify_token(token)
 
@@ -193,11 +200,12 @@ async def get_post_with_id(
     )
 
 
-@app.post('/like', dependencies=[Depends(auth.get_token_from_request)])
+@app.post('/likes', dependencies=[Depends(auth.get_token_from_request)])
 @limiter.limit("5/30 seconds")
 async def put_like(
         post_id: int,
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
     verify_token(token)
 
@@ -219,12 +227,60 @@ async def put_like(
     return {'ok': True}
 
 
+@app.delete('/likes', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/30 seconds")
+async def delete_like(
+        like_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    query = select(LikeModel).where(LikeModel.id == like_id)
+    result = await session.execute(query)
+    comment = result.scalar()
+    if not comment:
+        raise HTTPException(status_code=404, detail='Like not found')
+
+    uid = get_payload_from_token(token.token)['sub']
+    if comment.author_id != int(uid):
+        raise HTTPException(status_code=403, detail='This like is not yours.')
+
+    await session.delete(comment)
+    await session.commit()
+    return {'ok': True}
+
+
+@app.get('/likes', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/15 seconds")
+async def get_likes(
+        post_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> List[LikeResponseSchema]:
+    verify_token(token)
+
+    query = select(PostModel).where(PostModel.id == post_id)
+    result = await session.execute(query)
+    if not result.scalar():
+        raise HTTPException(status_code=404, detail='Post not found')
+
+    query = select(LikeModel).where(LikeModel.post_id == post_id)
+    results = await session.execute(query)
+    new_results = []
+    for result in results.scalars().all():
+        new_results.append(
+            LikeResponseSchema(like_id=result.id, post_id=post_id, author_id=result.author_id)
+        )
+    return new_results
+
+
 @app.post('/comments', dependencies=[Depends(auth.get_token_from_request)])
 @limiter.limit("5/30 seconds")
 async def add_comment(
-        _request: Request,
         comment: CommentSchema,
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
     verify_token(token)
 
@@ -241,11 +297,35 @@ async def add_comment(
     return {'ok': True}
 
 
+@app.delete('/comments', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/30 seconds")
+async def delete_comment(
+        comment_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    query = select(CommentModel).where(CommentModel.id == comment_id)
+    result = await session.execute(query)
+    comment = result.scalar()
+    if not comment:
+        raise HTTPException(status_code=404, detail='Comment not found')
+    uid = get_payload_from_token(token.token)['sub']
+    if comment.author_id != int(uid):
+        raise HTTPException(status_code=403, detail='This comment is not yours.')
+
+    await session.delete(comment)
+    await session.commit()
+    return {'ok': True}
+
+
 @app.get('/comments', dependencies=[Depends(auth.get_token_from_request)])
 @limiter.limit("5/15 seconds")
-async def get_comment(
+async def get_comments(
         post_id: int,
         session: SessionDep,
+        request: Request,  # noqa
         token: RequestToken = Depends()) -> List[CommentResponseSchema]:
     verify_token(token)
 
@@ -259,10 +339,10 @@ async def get_comment(
     new_results = []
     for result in results.scalars().all():
         new_results.append(
-            CommentResponseSchema(comment_id=result.id, post_id=post_id, title=result.title, author_id=result.id)
+            CommentResponseSchema(comment_id=result.id, post_id=post_id, title=result.title, author_id=result.author_id)
         )
     return new_results
 
 
 if __name__ == '__main__':
-    uvicorn.run('main:app', reload=True, host='10.20.18.251')
+    uvicorn.run('main:app', reload=True, host='10.20.15.71')

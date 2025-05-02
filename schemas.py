@@ -31,6 +31,12 @@ class PostResponseSchema(PostCreateSchema):
     likes: int
 
 
+class LikeResponseSchema(BaseModel):
+    like_id: int
+    post_id: int
+    author_id: int
+
+
 class CommentSchema(BaseModel):
     post_id: int
     title: str
