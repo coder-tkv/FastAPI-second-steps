@@ -14,8 +14,8 @@ def get_payload_from_token(token: str):
     try:
         payload = jwt.decode(token, config.JWT_SECRET_KEY, algorithms=[config.JWT_ALGORITHM])
         return payload
-    except PyJWTError as e:
-        raise ValueError(f"Invalid token: {e}")
+    except PyJWTError:
+        raise HTTPException(401, detail="Invalid token")
 
 
 def verify_token(token):
