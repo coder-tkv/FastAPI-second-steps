@@ -30,7 +30,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 SessionDep = Annotated[AsyncSession, Depends(get_sessions)]
 
 
-@app.post('/register')
+@app.post('/register', tags=['Пользователь 😀'])
 @limiter.limit("2/minute")
 async def register(
         creds: UserRegisterSchema,
@@ -53,7 +53,7 @@ async def register(
     return {'ok': True}
 
 
-@app.post('/login')
+@app.post('/login', tags=['Пользователь 😀'])
 @limiter.limit("5/minute")
 async def login(
         creds: UserLoginSchema,
@@ -78,7 +78,7 @@ async def login(
     raise HTTPException(status_code=401, detail='Incorrect password')
 
 
-@app.get('/users', dependencies=[Depends(auth.get_token_from_request)])
+@app.get('/users', dependencies=[Depends(auth.get_token_from_request)], tags=['Пользователь 😀'])
 @limiter.limit("5/15 seconds")
 async def get_users(
         session: SessionDep,
@@ -96,7 +96,7 @@ async def get_users(
     return new_results
 
 
-@app.get('/users/{user_id}', dependencies=[Depends(auth.get_token_from_request)])
+@app.get('/users/{user_id}', dependencies=[Depends(auth.get_token_from_request)], tags=['Пользователь 😀'])
 @limiter.limit("5/15 seconds")
 async def get_user_with_id(
         user_id: int,
@@ -113,7 +113,7 @@ async def get_user_with_id(
     raise HTTPException(status_code=404, detail='User not found')
 
 
-@app.post('/posts', dependencies=[Depends(auth.get_token_from_request)])
+@app.post('/posts', dependencies=[Depends(auth.get_token_from_request)], tags=['Пост ✉️'])
 @limiter.limit("5/minute")
 async def create_post(
         post: PostCreateSchema,
@@ -136,7 +136,7 @@ async def create_post(
     return {'ok': True}
 
 
-@app.get('/posts', dependencies=[Depends(auth.get_token_from_request)])
+@app.get('/posts', dependencies=[Depends(auth.get_token_from_request)], tags=['Пост ✉️'])
 @limiter.limit("5/15 seconds")
 async def get_posts(
         session: SessionDep,
@@ -163,7 +163,7 @@ async def get_posts(
     return new_results
 
 
-@app.get('/posts/{post_id}', dependencies=[Depends(auth.get_token_from_request)])
+@app.get('/posts/{post_id}', dependencies=[Depends(auth.get_token_from_request)], tags=['Пост ✉️'])
 @limiter.limit("5/15 seconds")
 async def get_post_with_id(
         post_id: int,
@@ -191,7 +191,42 @@ async def get_post_with_id(
     )
 
 
-@app.post('/likes', dependencies=[Depends(auth.get_token_from_request)])
+@app.delete('/posts', dependencies=[Depends(auth.get_token_from_request)], tags=['Пост ✉️'])
+@limiter.limit("5/30 seconds")
+async def delete_post(
+        post_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    query = select(PostModel).where(PostModel.id == post_id)
+    result = await session.execute(query)
+    post = result.scalar()
+    if not post:
+        raise HTTPException(status_code=404, detail='Post not found')
+
+    uid = get_payload_from_token(token.token)['sub']
+    if post.author_id != int(uid):
+        raise HTTPException(status_code=401, detail='This post is not yours')
+
+    await session.delete(post)
+
+    query = select(LikeModel).where(LikeModel.post_id == post_id)
+    result = await session.execute(query)
+    for like in result.scalars().all():
+        await session.delete(like)
+
+    query = select(CommentModel).where(CommentModel.post_id == post_id)
+    result = await session.execute(query)
+    for comment in result.scalars().all():
+        await session.delete(comment)
+
+    await session.commit()
+    return {'ok': True}
+
+
+@app.post('/likes', dependencies=[Depends(auth.get_token_from_request)], tags=['Лайк 💘'])
 @limiter.limit("5/30 seconds")
 async def put_like(
         post_id: int,
@@ -218,7 +253,7 @@ async def put_like(
     return {'ok': True}
 
 
-@app.get('/likes', dependencies=[Depends(auth.get_token_from_request)])
+@app.get('/likes', dependencies=[Depends(auth.get_token_from_request)], tags=['Лайк 💘'])
 @limiter.limit("5/15 seconds")
 async def get_likes(
         post_id: int,
@@ -242,7 +277,7 @@ async def get_likes(
     return new_results
 
 
-@app.delete('/likes', dependencies=[Depends(auth.get_token_from_request)])
+@app.delete('/likes', dependencies=[Depends(auth.get_token_from_request)], tags=['Лайк 💘'])
 @limiter.limit("5/30 seconds")
 async def delete_like(
         like_id: int,
@@ -266,7 +301,7 @@ async def delete_like(
     return {'ok': True}
 
 
-@app.post('/comments', dependencies=[Depends(auth.get_token_from_request)])
+@app.post('/comments', dependencies=[Depends(auth.get_token_from_request)], tags=['Комментарий ✒️'])
 @limiter.limit("5/30 seconds")
 async def add_comment(
         comment: CommentSchema,
@@ -288,7 +323,7 @@ async def add_comment(
     return {'ok': True}
 
 
-@app.get('/comments', dependencies=[Depends(auth.get_token_from_request)])
+@app.get('/comments', dependencies=[Depends(auth.get_token_from_request)], tags=['Комментарий ✒️'])
 @limiter.limit("5/15 seconds")
 async def get_comments(
         post_id: int,
@@ -312,7 +347,7 @@ async def get_comments(
     return new_results
 
 
-@app.delete('/comments', dependencies=[Depends(auth.get_token_from_request)])
+@app.delete('/comments', dependencies=[Depends(auth.get_token_from_request)], tags=['Комментарий ✒️'])
 @limiter.limit("5/30 seconds")
 async def delete_comment(
         comment_id: int,
@@ -336,7 +371,7 @@ async def delete_comment(
     return {'ok': True}
 
 
-@app.post('/admin/drop_and_create_database', dependencies=[Depends(auth.get_token_from_request)])
+@app.post('/admin/drop_and_create_database', dependencies=[Depends(auth.get_token_from_request)], tags=['Админ ✨'])
 @limiter.limit("5/minute")
 async def admin_setup_database(
         request: Request,  # noqa
@@ -358,7 +393,7 @@ async def admin_setup_database(
     return {'ok': True}
 
 
-@app.delete('/admin/delete_comment', dependencies=[Depends(auth.get_token_from_request)])
+@app.delete('/admin/delete_comment', dependencies=[Depends(auth.get_token_from_request)], tags=['Админ ✨'])
 @limiter.limit("5/30 seconds")
 async def admin_delete_comment(
         comment_id: int,
@@ -384,7 +419,7 @@ async def admin_delete_comment(
     return {'ok': True}
 
 
-@app.delete('/admin/delete_like', dependencies=[Depends(auth.get_token_from_request)])
+@app.delete('/admin/delete_like', dependencies=[Depends(auth.get_token_from_request)], tags=['Админ ✨'])
 @limiter.limit("5/30 seconds")
 async def admin_delete_like(
         like_id: int,
