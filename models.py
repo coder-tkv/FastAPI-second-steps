@@ -10,6 +10,7 @@ class UserModel(Base):
     password = Column(String)
     bio = Column(String)
     age = Column(Integer)
+    role = Column(String)
 
 
 class PostModel(Base):
