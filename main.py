@@ -1,6 +1,5 @@
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
 from typing import Annotated, List
 
 from sqlalchemy import select
@@ -8,10 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from authx import RequestToken
 import hashlib
+import os
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from models import Base, UserModel, PostModel, LikeModel, CommentModel
 from schemas import UserRegisterSchema, UserLoginSchema, UserResponseSchema, PostCreateSchema, PostResponseSchema, \
@@ -22,28 +23,11 @@ from jwt_authx import auth, get_payload_from_token, verify_token
 
 app = FastAPI()
 
-
-@app.exception_handler(RateLimitExceeded)
-async def rate_limit_exceeded_handler(_request: Request, _exc: RateLimitExceeded):
-    return JSONResponse(
-        status_code=429,
-        content={"detail": "Too Many Requests."}
-    )
-
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 SessionDep = Annotated[AsyncSession, Depends(get_sessions)]
-
-
-@app.post('/setup_database')
-@limiter.limit("1/minute")
-async def setup_database(request: Request) -> dict:  # noqa
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    return {'ok': True}
 
 
 @app.post('/register')
@@ -55,13 +39,14 @@ async def register(
     query = select(UserModel).where(creds.username == UserModel.username)
     result = await session.execute(query)
     if result.scalar():
-        raise HTTPException(status_code=403, detail='Users exists')
+        raise HTTPException(status_code=401, detail='Users exists')
     password_hash = hashlib.md5(creds.password.encode()).hexdigest()
     new_user = UserModel(
         username=creds.username,
         password=password_hash,
         bio=creds.bio,
-        age=creds.age
+        age=creds.age,
+        role='user'
     )
     session.add(new_user)
     await session.commit()
@@ -78,13 +63,19 @@ async def login(
     result = await session.execute(query)
     db_user = result.scalar()
     if not db_user:
-        raise HTTPException(status_code=403, detail='Incorrect username')
+        raise HTTPException(status_code=401, detail='Incorrect username')
 
     password_hash = hashlib.md5(creds.password.encode()).hexdigest()
     if db_user.password == password_hash:
-        token = auth.create_access_token(uid=str(db_user.id))
+        token = auth.create_access_token(
+            uid=str(db_user.id),
+            data={
+                "role": db_user.role,
+            }
+        )
+        get_payload_from_token(token)
         return {'access_token': token}
-    raise HTTPException(status_code=403, detail='Incorrect password')
+    raise HTTPException(status_code=401, detail='Incorrect password')
 
 
 @app.get('/users', dependencies=[Depends(auth.get_token_from_request)])
@@ -219,34 +210,10 @@ async def put_like(
     query = select(LikeModel).where(LikeModel.author_id == uid).where(LikeModel.post_id == post_id)
     result = await session.execute(query)
     if result.scalar():
-        raise HTTPException(status_code=403, detail='Like already given')
+        raise HTTPException(status_code=401, detail='Like already given')
 
     like = LikeModel(post_id=post_id, author_id=uid)
     session.add(like)
-    await session.commit()
-    return {'ok': True}
-
-
-@app.delete('/likes', dependencies=[Depends(auth.get_token_from_request)])
-@limiter.limit("5/30 seconds")
-async def delete_like(
-        like_id: int,
-        session: SessionDep,
-        request: Request,  # noqa
-        token: RequestToken = Depends()) -> dict:
-    verify_token(token)
-
-    query = select(LikeModel).where(LikeModel.id == like_id)
-    result = await session.execute(query)
-    comment = result.scalar()
-    if not comment:
-        raise HTTPException(status_code=404, detail='Like not found')
-
-    uid = get_payload_from_token(token.token)['sub']
-    if comment.author_id != int(uid):
-        raise HTTPException(status_code=403, detail='This like is not yours.')
-
-    await session.delete(comment)
     await session.commit()
     return {'ok': True}
 
@@ -275,6 +242,30 @@ async def get_likes(
     return new_results
 
 
+@app.delete('/likes', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/30 seconds")
+async def delete_like(
+        like_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    query = select(LikeModel).where(LikeModel.id == like_id)
+    result = await session.execute(query)
+    comment = result.scalar()
+    if not comment:
+        raise HTTPException(status_code=404, detail='Like not found')
+
+    uid = get_payload_from_token(token.token)['sub']
+    if comment.author_id != int(uid):
+        raise HTTPException(status_code=401, detail='This like is not yours')
+
+    await session.delete(comment)
+    await session.commit()
+    return {'ok': True}
+
+
 @app.post('/comments', dependencies=[Depends(auth.get_token_from_request)])
 @limiter.limit("5/30 seconds")
 async def add_comment(
@@ -293,29 +284,6 @@ async def add_comment(
 
     db_comment = CommentModel(post_id=comment.post_id, author_id=uid, title=comment.title)
     session.add(db_comment)
-    await session.commit()
-    return {'ok': True}
-
-
-@app.delete('/comments', dependencies=[Depends(auth.get_token_from_request)])
-@limiter.limit("5/30 seconds")
-async def delete_comment(
-        comment_id: int,
-        session: SessionDep,
-        request: Request,  # noqa
-        token: RequestToken = Depends()) -> dict:
-    verify_token(token)
-
-    query = select(CommentModel).where(CommentModel.id == comment_id)
-    result = await session.execute(query)
-    comment = result.scalar()
-    if not comment:
-        raise HTTPException(status_code=404, detail='Comment not found')
-    uid = get_payload_from_token(token.token)['sub']
-    if comment.author_id != int(uid):
-        raise HTTPException(status_code=403, detail='This comment is not yours.')
-
-    await session.delete(comment)
     await session.commit()
     return {'ok': True}
 
@@ -344,5 +312,103 @@ async def get_comments(
     return new_results
 
 
+@app.delete('/comments', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/30 seconds")
+async def delete_comment(
+        comment_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    query = select(CommentModel).where(CommentModel.id == comment_id)
+    result = await session.execute(query)
+    comment = result.scalar()
+    if not comment:
+        raise HTTPException(status_code=404, detail='Comment not found')
+
+    uid = get_payload_from_token(token.token)['sub']
+    if comment.author_id != int(uid):
+        raise HTTPException(status_code=401, detail='This comment is not yours')
+
+    await session.delete(comment)
+    await session.commit()
+    return {'ok': True}
+
+
+@app.post('/admin/drop_and_create_database', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/minute")
+async def admin_setup_database(
+        request: Request,  # noqa
+        session: SessionDep,
+        token: RequestToken = Depends()) -> dict:
+    if not os.path.exists('database.db'):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+        return {'ok': True}
+    uid = get_payload_from_token(token.token)['sub']
+    query = select(UserModel).where(UserModel.id == uid)
+    result = await session.execute(query)
+    if result.scalar().role != 'admin':
+        raise HTTPException(status_code=403, detail='You are not admin')
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    return {'ok': True}
+
+
+@app.delete('/admin/delete_comment', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/30 seconds")
+async def admin_delete_comment(
+        comment_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    uid = get_payload_from_token(token.token)['sub']
+    query = select(UserModel).where(UserModel.id == uid)
+    result = await session.execute(query)
+    if result.scalar().role != 'admin':
+        raise HTTPException(status_code=403, detail='You are not admin')
+
+    query = select(CommentModel).where(CommentModel.id == comment_id)
+    result = await session.execute(query)
+    comment = result.scalar()
+    if not comment:
+        raise HTTPException(status_code=404, detail='Comment not found')
+
+    await session.delete(comment)
+    await session.commit()
+    return {'ok': True}
+
+
+@app.delete('/admin/delete_like', dependencies=[Depends(auth.get_token_from_request)])
+@limiter.limit("5/30 seconds")
+async def admin_delete_like(
+        like_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    verify_token(token)
+
+    uid = get_payload_from_token(token.token)['sub']
+    query = select(UserModel).where(UserModel.id == uid)
+    result = await session.execute(query)
+    if result.scalar().role != 'admin':
+        raise HTTPException(status_code=403, detail='You are not admin')
+
+    query = select(LikeModel).where(LikeModel.id == like_id)
+    result = await session.execute(query)
+    comment = result.scalar()
+    if not comment:
+        raise HTTPException(status_code=404, detail='Like not found')
+
+    await session.delete(comment)
+    await session.commit()
+    return {'ok': True}
+
+
 if __name__ == '__main__':
-    uvicorn.run('main:app', reload=True, host='10.20.15.71')
+    uvicorn.run('main:app', reload=True)
