@@ -8,7 +8,7 @@ class UserSchema(BaseModel):
 
 
 class UserResponseSchema(UserSchema):
-    id: int
+    user_id: int
 
 
 class UserRegisterSchema(UserSchema):
@@ -26,5 +26,16 @@ class PostCreateSchema(BaseModel):
 
 
 class PostResponseSchema(PostCreateSchema):
-    id: int
+    post_id: int
+    author_id: int
+    likes: int
+
+
+class CommentSchema(BaseModel):
+    post_id: int
+    title: str
+
+
+class CommentResponseSchema(CommentSchema):
+    comment_id: int
     author_id: int
