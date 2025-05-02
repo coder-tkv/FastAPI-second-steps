@@ -84,7 +84,7 @@ async def get_users(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> List[UserResponseSchema]:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(UserModel)
     results = await session.execute(query)
@@ -103,7 +103,7 @@ async def get_user_with_id(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> UserResponseSchema:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(UserModel).where(user_id == UserModel.id)
     db_user = await session.execute(query)
@@ -113,6 +113,42 @@ async def get_user_with_id(
     raise HTTPException(status_code=404, detail='User not found')
 
 
+@app.delete('/users', dependencies=[Depends(auth.get_token_from_request)], tags=['Пользователь 😀'])
+@limiter.limit("5/30 seconds")
+async def delete_user(
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    await verify_token(token, session)
+
+    uid = get_payload_from_token(token.token)['sub']
+    query = select(UserModel).where(UserModel.id == uid)
+    result = await session.execute(query)
+    user = result.scalar()
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    await session.delete(user)
+
+    query = select(PostModel).where(PostModel.author_id == uid)
+    result = await session.execute(query)
+    for post in result.scalars().all():
+        await session.delete(post)
+
+    query = select(LikeModel).where(LikeModel.author_id == uid)
+    result = await session.execute(query)
+    for like in result.scalars().all():
+        await session.delete(like)
+
+    query = select(CommentModel).where(CommentModel.author_id == uid)
+    result = await session.execute(query)
+    for comment in result.scalars().all():
+        await session.delete(comment)
+
+    await session.commit()
+    return {'ok': True}
+
+
 @app.post('/posts', dependencies=[Depends(auth.get_token_from_request)], tags=['Пост ✉️'])
 @limiter.limit("5/minute")
 async def create_post(
@@ -120,7 +156,7 @@ async def create_post(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     uid = get_payload_from_token(token.token)['sub']
 
@@ -142,7 +178,7 @@ async def get_posts(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> List[PostResponseSchema]:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(PostModel)
     post_results = await session.execute(query)
@@ -170,7 +206,7 @@ async def get_post_with_id(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> PostResponseSchema:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(PostModel).where(post_id == PostModel.id)
     result = await session.execute(query)
@@ -198,7 +234,7 @@ async def delete_post(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(PostModel).where(PostModel.id == post_id)
     result = await session.execute(query)
@@ -233,7 +269,7 @@ async def put_like(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     uid = get_payload_from_token(token.token)['sub']
 
@@ -260,7 +296,7 @@ async def get_likes(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> List[LikeResponseSchema]:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(PostModel).where(PostModel.id == post_id)
     result = await session.execute(query)
@@ -284,7 +320,7 @@ async def delete_like(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(LikeModel).where(LikeModel.id == like_id)
     result = await session.execute(query)
@@ -308,7 +344,7 @@ async def add_comment(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(PostModel).where(PostModel.id == comment.post_id)
     result = await session.execute(query)
@@ -330,7 +366,7 @@ async def get_comments(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> List[CommentResponseSchema]:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(PostModel).where(PostModel.id == post_id)
     result = await session.execute(query)
@@ -354,7 +390,7 @@ async def delete_comment(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     query = select(CommentModel).where(CommentModel.id == comment_id)
     result = await session.execute(query)
@@ -400,7 +436,7 @@ async def admin_delete_comment(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     uid = get_payload_from_token(token.token)['sub']
     query = select(UserModel).where(UserModel.id == uid)
@@ -426,7 +462,7 @@ async def admin_delete_like(
         session: SessionDep,
         request: Request,  # noqa
         token: RequestToken = Depends()) -> dict:
-    verify_token(token)
+    await verify_token(token, session)
 
     uid = get_payload_from_token(token.token)['sub']
     query = select(UserModel).where(UserModel.id == uid)
@@ -443,6 +479,43 @@ async def admin_delete_like(
     await session.delete(comment)
     await session.commit()
     return {'ok': True}
+
+
+@app.delete('/admin/delete_user', dependencies=[Depends(auth.get_token_from_request)], tags=['Админ ✨'])
+@limiter.limit("5/30 seconds")
+async def delete_user(
+        user_id: int,
+        session: SessionDep,
+        request: Request,  # noqa
+        token: RequestToken = Depends()) -> dict:
+    await verify_token(token, session)
+
+    query = select(UserModel).where(UserModel.id == user_id)
+    result = await session.execute(query)
+    user = result.scalar()
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    await session.delete(user)
+
+    query = select(PostModel).where(PostModel.author_id == user_id)
+    result = await session.execute(query)
+    for post in result.scalars().all():
+        await session.delete(post)
+
+    query = select(LikeModel).where(LikeModel.author_id == user_id)
+    result = await session.execute(query)
+    for like in result.scalars().all():
+        await session.delete(like)
+
+    query = select(CommentModel).where(CommentModel.author_id == user_id)
+    result = await session.execute(query)
+    for comment in result.scalars().all():
+        await session.delete(comment)
+
+    await session.commit()
+    return {'ok': True}
+
 
 
 if __name__ == '__main__':
